@@ -1,10 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -18,9 +18,8 @@ func main() {
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, `
 
-The json command prints a JSON value specified by the command line arguments.
+The json command prints a sequence of JSON values specified by the command line arguments.
 It's intended to make it straightforward to write JSON values on the command line.
-If there are no arguments, it prints null.
 
 As the brace character is special to some shells, it uses [ and ] as delimiters.
 Map keys are denoted with a trailing colon.
@@ -36,12 +35,24 @@ For example:
 The grammar is as follows (in BNF notation as used by https://golang.org/ref/spec).
 All tokens represent exactly one argument on the command line:
 
-	args = keyValues | value
-	keyValues = { KEY value }
+	args = { value } | keyValues
 	value = "null" | "true" | "false" | typeAssertion | object | array | STR
 	typeAssertion = ( "str" | "num" | "bool" | "jsonstr" ) value
 	object = "[" keyValues "]"
+	keyValues = { KEY value }
 	array = ".[" { value } "]"
+
+Note that if the top argument looks like an object key (it ends with a colon (:)),
+the entire command line represents a single object; otherwise, the arguments
+represent a sequence of independent objects.
+
+Thus
+
+	json [ a: b ]
+
+is exactly the same as
+
+	json a: b
 
 A value that does not look like any of the acceptable JSON values will be treated
 as a number if it looks like a number, and as a string otherwise. To ensure that
@@ -83,27 +94,32 @@ The possible assertions are:
 
 			$ json jsonstr [ a: 45 b: .[ a b c } ]
 			"{\"a\":45,\"b\":[\"a\",\"b\",\"c\"]}"
+
+	json
+		The following argument is treated as a JSON-encoded string
+		and included as literal JSON. The string must hold well-formed JSON.
 `)
 		os.Exit(2)
 	}
 
 	flag.Parse()
-	expr, err := parse(flag.Args())
+	exprs, err := parse(flag.Args())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "json: %s\n", err)
 		os.Exit(1)
 	}
-	var data []byte
+	w := bufio.NewWriter(os.Stdout)
+	defer w.Flush()
+	enc := json.NewEncoder(w)
 	if *indent {
-		data, err = json.MarshalIndent(expr, "", "\t")
-	} else {
-		data, err = json.Marshal(expr)
+		enc.SetIndent("", "\t")
 	}
-	if err != nil {
-		// Should never happen.
-		log.Fatal("json: ", err)
+	for _, expr := range exprs {
+		if err := enc.Encode(expr); err != nil {
+			fmt.Fprintf(os.Stderr, "cannot encode value %#v: %v\n", expr, err)
+			os.Exit(1)
+		}
 	}
-	fmt.Printf("%s\n", data)
 }
 
 type parser struct {
@@ -119,7 +135,7 @@ func (e *syntaxError) Error() string {
 	return e.e
 }
 
-func parse(args []string) (_ interface{}, err error) {
+func parse(args []string) (_ []interface{}, err error) {
 	defer func() {
 		e := recover()
 		if e == nil {
@@ -134,7 +150,7 @@ func parse(args []string) (_ interface{}, err error) {
 	return parse1(&parser{args: args}), nil
 }
 
-func parse1(p *parser) interface{} {
+func parse1(p *parser) []interface{} {
 	a, ok := p.peek()
 	if !ok {
 		// No arguments -> null.
@@ -146,13 +162,20 @@ func parse1(p *parser) interface{} {
 		if a, ok := p.peek(); ok {
 			syntaxErrorf("unexpected argument %q at %d", a, p.index)
 		}
-		return obj
+		return []interface{}{obj}
 	}
-	obj := parseValue(p)
-	if a, ok := p.peek(); ok {
-		syntaxErrorf("unexpected argument %q at %d (multiple top level arguments must form an object)", a, p.index)
+	var exprs []interface{}
+	for {
+		a, ok := p.peek()
+		if !ok {
+			return exprs
+		}
+		if a == "]" {
+			syntaxErrorf("unexpected argument ] at %d, expected value", p.index)
+		}
+		exprs = append(exprs, parseValue(p))
 	}
-	return obj
+	return exprs
 }
 
 func parseKeyValues(p *parser) interface{} {
