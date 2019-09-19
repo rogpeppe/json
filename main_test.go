@@ -49,6 +49,10 @@ var parseTests = []struct {
 	args:     []string{"num", "123"},
 	expect:   []interface{}{123.0},
 }, {
+	testName: "json-string",
+	args:     []string{"json", `{"a": "b"}`},
+	expect:   []interface{}{map[string]interface{}{"a": "b"}},
+}, {
 	testName:    "forced-number-with-invalid-number",
 	args:        []string{"num", "a"},
 	expectError: `invalid number "a" at argument 1`,

@@ -222,6 +222,15 @@ func parseValue(p *parser) interface{} {
 		return false
 	case "str":
 		return p.mustNext("str argument")
+	case "json":
+		a := p.mustNext("json argument")
+		dec := json.NewDecoder(strings.NewReader(a))
+		dec.UseNumber()
+		var x interface{}
+		if err := dec.Decode(&x); err != nil {
+			syntaxErrorf("cannot unmarshal json %q at argument %d", a, p.index-1)
+		}
+		return x
 	case "jsonstr":
 		v := parseValue(p)
 		data, err := json.Marshal(v)
