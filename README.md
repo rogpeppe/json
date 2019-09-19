@@ -1,8 +1,7 @@
 # json: command-line printing of JSON values
 
-The json command prints a JSON value specified by the command line arguments.
+The json command prints a sequence of JSON values specified by the command line arguments.
 It's intended to make it straightforward to write JSON values on the command line.
-If there are no arguments, it prints `null`.
 
 As the brace character is special to some shells, it uses `[` and `]` as delimiters.
 Map keys are denoted with a trailing colon.
@@ -18,12 +17,24 @@ For example:
 The grammar is as follows (in BNF notation as used by https://golang.org/ref/spec).
 All tokens represent exactly one argument on the command line:
 
-	args = keyValues | value
-	keyValues = { KEY value }
+	args = { value } | keyValues
 	value = "null" | "true" | "false" | typeAssertion | object | array | STR
 	typeAssertion = ( "str" | "num" | "bool" | "jsonstr" ) value
 	object = "[" keyValues "]"
+	keyValues = { KEY value }
 	array = ".[" { value } "]"
+
+Note that if the top argument looks like an object key (it ends with a colon (:)),
+the entire command line represents a single object; otherwise, the arguments
+represent a sequence of independent objects.
+
+Thus
+
+	json [ a: b ]
+
+is exactly the same as
+
+	json a: b
 
 A value that does not look like any of the acceptable JSON values will be treated
 as a number if it looks like a number, and as a string otherwise. To ensure that
@@ -65,3 +76,7 @@ The possible assertions are:
 
 			$ json jsonstr [ a: 45 b: .[ a b c } ]
 			"{\"a\":45,\"b\":[\"a\",\"b\",\"c\"]}"
+
+	json
+		The following argument is treated as a JSON-encoded string
+		and included as literal JSON. The string must hold well-formed JSON.
