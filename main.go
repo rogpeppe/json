@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -33,13 +34,15 @@ For example:
 	{"bar":{"x":657},"foo":45,"y":[3,5,6]}
 
 The grammar is as follows (in BNF notation as used by https://golang.org/ref/spec).
-All tokens represent exactly one argument on the command line:
+All tokens represent exactly one argument on the command line. STR is any string;
+KEY is a string with a ":" suffix.
 
 	args = { value } | keyValues
 	value = "null" | "true" | "false" | typeAssertion | object | array | STR
 	typeAssertion = ( "str" | "num" | "bool" | "jsonstr" ) value
 	object = "[" keyValues "]"
-	keyValues = { KEY value }
+	keyValues = { key value }
+	key = KEY | "key" STR
 	array = ".[" { value } "]"
 
 Note that if the top argument looks like an object key (it ends with a colon (:)),
@@ -65,6 +68,12 @@ of environment variables) from being treated as lexically significant tokens.
 
 The possible assertions are:
 
+	key
+		The following argument is treated as a key. It must be present, but can contain
+		any value. For example:
+
+			$ json key 'a"b' hello
+			{"a\"b": "hello"}
 	str
 		The following argument is treated as a string. It must be present, but can contain
 		any value. For example:
@@ -98,6 +107,9 @@ The possible assertions are:
 	json
 		The following argument is treated as a JSON-encoded string
 		and included as literal JSON. The string must hold well-formed JSON.
+		For example:
+			$  json [ one: 1 two: json '["two", 2]' ]
+			{"one":1,"two":["two",2]}
 `)
 		os.Exit(2)
 	}
@@ -157,7 +169,7 @@ func parse1(p *parser) []interface{} {
 		return nil
 	}
 	// It's an object key; parse the whole command line as an object.
-	if strings.HasSuffix(a, ":") {
+	if strings.HasSuffix(a, ":") || a == "key" {
 		obj := parseKeyValues(p)
 		if a, ok := p.peek(); ok {
 			syntaxErrorf("unexpected argument %q at %d", a, p.index)
@@ -185,11 +197,15 @@ func parseKeyValues(p *parser) interface{} {
 		if !ok || key == "]" {
 			return v
 		}
-		if !strings.HasSuffix(key, ":") {
-			syntaxErrorf("expected object key (ending in :) at argument %d, but got %q", p.index, key)
+		if key == "key" {
+			p.next()
+			key = p.mustPeek("key argument")
+		} else if !strings.HasSuffix(key, ":") {
+			syntaxErrorf("expected object key (ending in :) or 'key' keyword at argument %d, but got %q", p.index, key)
+		} else {
+			key = key[0 : len(key)-1]
 		}
 		p.next()
-		key = key[0 : len(key)-1]
 		v[key] = parseValue(p)
 	}
 	return v
@@ -244,7 +260,11 @@ func parseValue(p *parser) interface{} {
 		if err != nil {
 			syntaxErrorf("invalid number %q at argument %d", a, p.index-1)
 		}
-		return n
+		if math.IsInf(n, 0) || math.IsNaN(n) {
+			syntaxErrorf("%q is not a regular floating point number and cannot be encoded to JSON", a)
+		}
+		// Preserve the original form of the number to avoid losing precision.
+		return json.Number(a)
 	case "bool":
 		a := p.mustNext("boolean value")
 		v, err := strconv.ParseBool(a)
@@ -253,6 +273,9 @@ func parseValue(p *parser) interface{} {
 		}
 		return v
 	default:
+		if strings.HasSuffix(a, ":") || a == "key" {
+			syntaxErrorf("argument %d; expected value, got key", p.index-1)
+		}
 		// If it looks like a float, treat it as a float.
 		n, err := strconv.ParseFloat(a, 64)
 		if err == nil {

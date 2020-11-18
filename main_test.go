@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -47,7 +48,7 @@ var parseTests = []struct {
 }, {
 	testName: "forced-number",
 	args:     []string{"num", "123"},
-	expect:   []interface{}{123.0},
+	expect:   []interface{}{json.Number("123")},
 }, {
 	testName: "json-string",
 	args:     []string{"json", `{"a": "b"}`},
@@ -56,6 +57,14 @@ var parseTests = []struct {
 	testName:    "forced-number-with-invalid-number",
 	args:        []string{"num", "a"},
 	expectError: `invalid number "a" at argument 1`,
+}, {
+	testName:    "forced-number-with-infinity",
+	args:        []string{"num", "Inf"},
+	expectError: `"Inf" is not a regular floating point number and cannot be encoded to JSON`,
+}, {
+	testName:    "forced-number-with-NaN",
+	args:        []string{"num", "NaN"},
+	expectError: `"NaN" is not a regular floating point number and cannot be encoded to JSON`,
 }, {
 	testName: "top-level-object",
 	args:     []string{"xy:", "zw", "abc:", "de"},
@@ -77,6 +86,21 @@ var parseTests = []struct {
 			"c": []interface{}{1.0, 2.0},
 		},
 	}},
+}, {
+	testName: "literal-object-key",
+	args: []string{"key", "foo\"bar", "123", "x:", "y"},
+	expect: []interface{}{map[string]interface{}{
+		"foo\"bar": 123.0,
+		"x": "y",
+	}},
+}, {
+	testName: "key-in-value-position",
+	args: []string{"a:", "b:"},
+	expectError: `argument 1; expected value, got key`,
+}, {
+	testName: "key-keyword--in-value-position",
+	args: []string{"a:", "key", "k"},
+	expectError: `argument 1; expected value, got key`,
 }}
 
 func TestParse(t *testing.T) {

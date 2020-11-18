@@ -15,16 +15,19 @@ For example:
 	{"bar":{"x":657},"foo":45,"y":[3,5,6]}
 
 The grammar is as follows (in BNF notation as used by https://golang.org/ref/spec).
-All tokens represent exactly one argument on the command line:
+All tokens represent exactly one argument on the command line. STR is any argument;
+KEY is an argument with a ":" suffix.
 
 	args = { value } | keyValues
 	value = "null" | "true" | "false" | typeAssertion | object | array | STR
 	typeAssertion = ( "str" | "num" | "bool" | "jsonstr" ) value
 	object = "[" keyValues "]"
-	keyValues = { KEY value }
+	keyValues = { key value }
+	key = KEY | "key" STR
 	array = ".[" { value } "]"
 
-Note that if the top argument looks like an object key (it ends with a colon (:)),
+Note that if the first argument looks like an object key (it ends with a colon (:) or
+is the literal string "key"),
 the entire command line represents a single object; otherwise, the arguments
 represent a sequence of independent objects.
 
@@ -36,7 +39,7 @@ is exactly the same as
 
 	json a: b
 
-A value that does not look like any of the acceptable JSON values will be treated
+A value that does not look like any of the acceptable JSON values or an object key will be treated
 as a number if it looks like a number, and as a string otherwise. To ensure that
 externally-provided values take on their expected type, type assertions can be used.
 
